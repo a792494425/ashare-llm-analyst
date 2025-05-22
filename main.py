@@ -884,7 +884,7 @@ class StockAnalyzer:
 if __name__ == "__main__":
     # 正确的股票代码示例
     stock_info = {
-        '跨境通': 'sz002640'
+        '上证指数': 'sh000001'
     }
 
     print("开始股票技术分析...")
