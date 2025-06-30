@@ -578,14 +578,14 @@ class StockAnalyzer:
                             <h2>技术指标图表</h2>
                     </div>
                     <div class="label-container">     
-                        <div class="chart-container" id="Section_4">
+                        <div class="chart-container">
                             <img src="data:image/png;base64,{chart_base64}" 
                                  alt="{stock_name} ({code})技术分析图表"
                                  loading="lazy">
                         </div>
                     </div>
                     
-                    <div class="section-divider">
+                    <div class="section-divider" id="Section_4">
                         <h2>人工智能分析报告</h2>
                     </div>
                     {ai_analysis_html}
