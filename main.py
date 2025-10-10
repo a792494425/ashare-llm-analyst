@@ -3,12 +3,11 @@ import os
 from datetime import datetime
 from io import BytesIO
 from string import Template
-import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
-import pytz
-from matplotlib.axes import Axes
 import numpy as np
-
+import plotly.graph_objs as go
+import pytz
+from plotly.subplots import make_subplots
 import Ashare as as_api
 import MyTT as mt
 from llm import LLMAnalyzer
@@ -262,169 +261,412 @@ class StockAnalyzer:
             return None
 
     def plot_analysis(self, code):
-        """绘制技术分析图表"""
+        """
+        将原复合图表拆分为四个独立的图表，每个图表单独渲染
+        美化版本：增强视觉效果、配色方案和交互体验
+        """
         if code not in self.data:
             print(f"错误: 无法绘制图表，股票代码 {code} 没有数据")
             return None
 
-        def _style_axis(ax: Axes, title: str):
-            """统一设置坐标轴样式"""
-            ax.set_title(title, pad=12)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['left'].set_color('#666666')
-            ax.spines['bottom'].set_color('#666666')
-            ax.tick_params(colors='#666666')
-            ax.grid(True, linestyle='--', alpha=0.3)
-            ax.legend(loc='upper left', frameon=True, facecolor='white',
-                      edgecolor='none', fontsize=10)
-            ax.set_facecolor('#F8F9FA')
-
-        stock_name = self.get_stock_name(code)
         df = self.calculate_indicators(code)
-
         if df is None:
             print(f"错误: 无法计算技术指标，跳过图表生成")
             return None
 
-        # 检查字体文件是否存在
-        font_path = './static/fonts/微软雅黑.ttf'
-        if os.path.exists(font_path):
-            try:
-                # 注册字体文件
-                custom_font = fm.FontProperties(fname=font_path)
-                fm.fontManager.addfont(font_path)
-                # 设置字体
-                plt.rcParams['font.sans-serif'] = [custom_font.get_name()]
-            except Exception as e:
-                print(f"字体文件加载失败，使用默认字体: {str(e)}")
-                plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
-        else:
-            print(f"字体文件不存在: {font_path}，使用默认字体")
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
-
-        plt.rcParams['axes.unicode_minus'] = False
-
-        # 设置全局样式
-        plt.rcParams.update({
-            'axes.facecolor': '#F8F9FA',
-            'axes.edgecolor': '#666666',
-            'grid.color': '#666666',
-            'grid.linestyle': '--',
-            'xtick.color': '#666666',
-            'ytick.color': '#666666',
-            'font.size': 10,
-            'axes.unicode_minus': False,
-            'axes.grid': True,
-            'grid.alpha': 0.3,
-            'axes.labelsize': 12,
-            'axes.titlesize': 14,
-            'figure.titlesize': 16,
-            'lines.linewidth': 1.5,
-            'lines.markersize': 6
-        })
+        stock_name = self.get_stock_name(code)
 
         try:
-            # 创建图表
-            fig = plt.figure(figsize=(15, 32))
-            fig.patch.set_facecolor('#F0F2F6')
-
-            # 配色方案
+            # 定义专业的配色方案
             colors = {
-                'primary': '#2E4053',
-                'ma5': '#E74C3C',
-                'ma10': '#3498DB',
-                'ma20': '#2ECC71',
-                'boll': ['#E74C3C', '#F4D03F', '#2ECC71'],
-                'volume': ['#E74C3C', '#2ECC71']
+                'close': '#2E86AB',  # 深蓝色 - 收盘价
+                'ma5': '#A23B72',  # 玫瑰红 - MA5
+                'ma10': '#F18F01',  # 橙色 - MA10
+                'ma20': '#C73E1D',  # 深红色 - MA20
+                'boll': '#6C757D',  # 灰色 - 布林带
+                'macd_pos': '#28A745',  # 绿色 - MACD正值
+                'macd_neg': '#DC3545',  # 红色 - MACD负值
+                'dif': '#FF6B35',  # 橙红色 - DIF
+                'dea': '#7209B7',  # 紫色 - DEA
+                'k': '#0D6EFD',  # 蓝色 - K线
+                'd': '#FD7E14',  # 橙色 - D线
+                'j': '#198754',  # 绿色 - J线
+                'rsi': '#6F42C1',  # 深紫色 - RSI
+                'overbought': '#DC3545',  # 红色 - 超买线
+                'oversold': '#198754'  # 绿色 - 超卖线
             }
 
-            # 主图：K线 + 均线 + BOLL
-            ax1 = plt.subplot2grid((12, 1), (0, 0), rowspan=2)
-            ax1.plot(df.index, df['close'], color=colors['primary'], label='收盘价', alpha=0.8, linewidth=2)
-            ax1.plot(df.index, df['MA5'], color=colors['ma5'], label='MA5', alpha=0.7)
-            ax1.plot(df.index, df['MA10'], color=colors['ma10'], label='MA10', alpha=0.7)
-            ax1.plot(df.index, df['MA20'], color=colors['ma20'], label='MA20', alpha=0.7)
-            ax1.plot(df.index, df['BOLL_UP'], color=colors['boll'][0], linestyle='--', label='BOLL上轨', alpha=0.7)
-            ax1.plot(df.index, df['BOLL_MID'], color=colors['boll'][1], linestyle='--', label='BOLL中轨', alpha=0.7)
-            ax1.plot(df.index, df['BOLL_LOW'], color=colors['boll'][2], linestyle='--', label='BOLL下轨', alpha=0.7)
-            _style_axis(ax1, f'{stock_name} ({code}) 技术指标')
+            charts_html = []
 
-            # MACD
-            ax2 = plt.subplot2grid((12, 1), (2, 0))
-            ax2.plot(df.index, df['DIF'], color='#E74C3C', label='DIF(差离值)', alpha=0.8)
-            ax2.plot(df.index, df['DEA'], color='#2ECC71', label='DEA(讯号线)', alpha=0.8)
-            ax2.bar(df.index, df['MACD'], color=np.where(df['MACD'] > 0, '#E74C3C', '#2ECC71'),
-                    label='MACD(指数平滑异同移动平均线)', alpha=0.6)
-            _style_axis(ax2, 'MACD (指数平滑异同移动平均线)')
+            # 1. 价格走势与技术指标图
+            price_fig = go.Figure()
 
-            # KDJ
-            ax3 = plt.subplot2grid((12, 1), (3, 0))
-            ax3.plot(df.index, df['K'], color='#E74C3C', label='K(随机指标K值)', alpha=0.8)
-            ax3.plot(df.index, df['D'], color='#2ECC71', label='D(随机指标D值)', alpha=0.8)
-            ax3.plot(df.index, df['J'], color='#3498DB', label='J(随机指标J值)', alpha=0.8)
-            _style_axis(ax3, 'KDJ(随机指标)')
+            # 收盘价
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['close'],
+                name='收盘价',
+                line=dict(color=colors['close'], width=3),
+                hovertemplate='<b>收盘价</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # RSI
-            ax4 = plt.subplot2grid((12, 1), (4, 0))
-            ax4.plot(df.index, df['RSI'], color='#8E44AD', label='RSI(相对强弱指标)', alpha=0.8)
-            ax4.axhline(y=80, color='#E74C3C', linestyle='--', alpha=0.5)
-            ax4.axhline(y=20, color='#2ECC71', linestyle='--', alpha=0.5)
-            _style_axis(ax4, 'RSI (相对强弱指标)')
+            # 移动平均线
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['MA5'],
+                name='MA5',
+                line=dict(color=colors['ma5'], width=2, dash='solid'),
+                hovertemplate='<b>MA5</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # BIAS
-            ax5 = plt.subplot2grid((12, 1), (5, 0))
-            ax5.plot(df.index, df['BIAS1'], color='#E74C3C', label='BIAS1', alpha=0.8)
-            ax5.plot(df.index, df['BIAS2'], color='#2ECC71', label='BIAS2', alpha=0.8)
-            ax5.plot(df.index, df['BIAS3'], color='#3498DB', label='BIAS3', alpha=0.8)
-            _style_axis(ax5, 'BIAS (乖离率)')
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['MA10'],
+                name='MA10',
+                line=dict(color=colors['ma10'], width=2, dash='solid'),
+                hovertemplate='<b>MA10</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # DMI
-            ax6 = plt.subplot2grid((12, 1), (6, 0))
-            ax6.plot(df.index, df['PDI'], color='#E74C3C', label='PDI(上升方向线)', alpha=0.8)
-            ax6.plot(df.index, df['MDI'], color='#2ECC71', label='MDI(下降方向线)', alpha=0.8)
-            ax6.plot(df.index, df['ADX'], color='#3498DB', label='ADX(趋向指标)', alpha=0.8)
-            ax6.plot(df.index, df['ADXR'], color='#F4D03F', label='ADXR(平均方向指数)', alpha=0.8)
-            _style_axis(ax6, 'DMI(动向指标)')
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['MA20'],
+                name='MA20',
+                line=dict(color=colors['ma20'], width=2, dash='solid'),
+                hovertemplate='<b>MA20</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # TRIX
-            ax7 = plt.subplot2grid((12, 1), (7, 0))
-            ax7.plot(df.index, df['TRIX'], color='#E74C3C', label='TRIX', alpha=0.8)
-            ax7.plot(df.index, df['TRMA'], color='#2ECC71', label='TRMA', alpha=0.8)
-            _style_axis(ax7, 'TRIX(三重指数平滑平均线)')
+            # 布林带
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['BOLL_UP'],
+                name='布林上轨',
+                line=dict(color=colors['boll'], width=1, dash='dot'),
+                hovertemplate='<b>布林上轨</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # ROC
-            ax8 = plt.subplot2grid((12, 1), (8, 0))
-            ax8.plot(df.index, df['ROC'], color='#E74C3C', label='ROC(变动率)', alpha=0.8)
-            ax8.plot(df.index, df['MAROC'], color='#2ECC71', label='MAROC(移动平均线)', alpha=0.8)
-            _style_axis(ax8, 'ROC(变动率)')
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['BOLL_LOW'],
+                name='布林下轨',
+                line=dict(color=colors['boll'], width=1, dash='dot'),
+                fill='tonexty',
+                fillcolor='rgba(108, 117, 125, 0.1)',
+                hovertemplate='<b>布林下轨</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # VR和AR/BR
-            ax9 = plt.subplot2grid((12, 1), (9, 0))
-            ax9.plot(df.index, df['VR'], color='#E74C3C', label='VR(成交量比率)', alpha=0.8)
-            ax9.plot(df.index, df['AR'], color='#2ECC71', label='AR(人气指标)', alpha=0.8)
-            ax9.plot(df.index, df['BR'], color='#3498DB', label='BR(意愿指标)', alpha=0.8)
-            _style_axis(ax9, '成交量指标')
+            price_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['BOLL_MID'],
+                name='布林中轨',
+                line=dict(color=colors['boll'], width=1, dash='dash'),
+                hovertemplate='<b>布林中轨</b><br>日期: %{x}<br>价格: ¥%{y:.2f}<extra></extra>'
+            ))
 
-            # MTM
-            ax10 = plt.subplot2grid((12, 1), (10, 0))
-            ax10.plot(df.index, df['MTM'], color='#E74C3C', label='MTM', alpha=0.8)
-            ax10.plot(df.index, df['MTMMA'], color='#2ECC71', label='MTMMA', alpha=0.8)
-            _style_axis(ax10, 'MTM(动量指标)')
+            # 添加当前价格注释
+            current_price = df['close'].iloc[-1]
+            price_fig.add_annotation(
+                x=df.index[-1],
+                y=current_price,
+                text=f"当前价格<br>¥{current_price:.2f}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                arrowcolor="#2E86AB",
+                bgcolor="rgba(46, 134, 171, 0.8)",
+                bordercolor="#2E86AB",
+                borderwidth=2,
+                font=dict(color="white", size=10)
+            )
 
-            # DMA
-            ax11 = plt.subplot2grid((12, 1), (11, 0))
-            ax11.plot(df.index, df['DIF_DMA'], color='#E74C3C', label='DIF_DMA', alpha=0.8)
-            ax11.plot(df.index, df['DIFMA_DMA'], color='#2ECC71', label='DIFMA_DMA', alpha=0.8)
-            _style_axis(ax11, 'DMA(平行线差指标)')
+            price_fig.update_layout(
+                title=f'📈 {stock_name} ({code}) 价格走势与技术指标',
+                height=500,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1
+                ),
+                hovermode='x unified',
+                template='plotly_white',
+                paper_bgcolor='#FAFAFA',
+                plot_bgcolor='white',
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='%Y-%m-%d'
+                ),
+                yaxis=dict(
+                    title="价格 (¥)",
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='.2f'
+                )
+            )
 
-            # 调整子图间距
-            plt.subplots_adjust(hspace=0.4)
+            charts_html.append(price_fig.to_html(
+                include_plotlyjs='cdn',
+                full_html=False,
+                config={
+                    'displayModeBar': True,
+                    'displaylogo': False,
+                    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                    'toImageButtonOptions': {
+                        'format': 'png',
+                        'filename': f'{stock_name}_{code}_price_analysis',
+                        'height': 500,
+                        'width': 1000,
+                        'scale': 2
+                    }
+                }
+            ))
 
-            return plot_to_base64(fig)
+            # 2. MACD指标图
+            macd_fig = go.Figure()
+
+            # MACD柱状图
+            macd_colors = [colors['macd_pos'] if x >= 0 else colors['macd_neg'] for x in df['MACD']]
+            macd_fig.add_trace(go.Bar(
+                x=df.index,
+                y=df['MACD'],
+                name='MACD柱',
+                marker_color=macd_colors,
+                marker_line=dict(width=0),
+                opacity=0.8,
+                hovertemplate='<b>MACD</b><br>日期: %{x}<br>值: %{y:.4f}<extra></extra>'
+            ))
+
+            macd_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['DIF'],
+                name='DIF快线',
+                line=dict(color=colors['dif'], width=2),
+                hovertemplate='<b>DIF</b><br>日期: %{x}<br>值: %{y:.4f}<extra></extra>'
+            ))
+
+            macd_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['DEA'],
+                name='DEA慢线',
+                line=dict(color=colors['dea'], width=2),
+                hovertemplate='<b>DEA</b><br>日期: %{x}<br>值: %{y:.4f}<extra></extra>'
+            ))
+
+            macd_fig.update_layout(
+                title=f'📊 {stock_name} ({code}) MACD指标',
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1
+                ),
+                hovermode='x unified',
+                template='plotly_white',
+                paper_bgcolor='#FAFAFA',
+                plot_bgcolor='white',
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='%Y-%m-%d'
+                ),
+                yaxis=dict(
+                    title="MACD",
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='.4f'
+                )
+            )
+
+            charts_html.append(macd_fig.to_html(
+                include_plotlyjs=False,
+                full_html=False,
+                config={
+                    'displayModeBar': True,
+                    'displaylogo': False,
+                    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                    'toImageButtonOptions': {
+                        'format': 'png',
+                        'filename': f'{stock_name}_{code}_macd_analysis',
+                        'height': 400,
+                        'width': 1000,
+                        'scale': 2
+                    }
+                }
+            ))
+
+            # 3. KDJ随机指标图
+            kdj_fig = go.Figure()
+
+            kdj_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['K'],
+                name='K值',
+                line=dict(color=colors['k'], width=2.5),
+                hovertemplate='<b>K值</b><br>日期: %{x}<br>值: %{y:.2f}<extra></extra>'
+            ))
+
+            kdj_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['D'],
+                name='D值',
+                line=dict(color=colors['d'], width=2.5),
+                hovertemplate='<b>D值</b><br>日期: %{x}<br>值: %{y:.2f}<extra></extra>'
+            ))
+
+            kdj_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['J'],
+                name='J值',
+                line=dict(color=colors['j'], width=2.5),
+                hovertemplate='<b>J值</b><br>日期: %{x}<br>值: %{y:.2f}<extra></extra>'
+            ))
+
+            # 添加KDJ参考线
+            kdj_fig.add_hline(y=80, line=dict(color='rgba(220, 53, 69, 0.5)', dash='dash', width=1))
+            kdj_fig.add_hline(y=20, line=dict(color='rgba(25, 135, 84, 0.5)', dash='dash', width=1))
+
+            kdj_fig.update_layout(
+                title=f'📉 {stock_name} ({code}) KDJ随机指标',
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1
+                ),
+                hovermode='x unified',
+                template='plotly_white',
+                paper_bgcolor='#FAFAFA',
+                plot_bgcolor='white',
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='%Y-%m-%d'
+                ),
+                yaxis=dict(
+                    title="KDJ (%)",
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='.2f'
+                )
+            )
+
+            charts_html.append(kdj_fig.to_html(
+                include_plotlyjs=False,
+                full_html=False,
+                config={
+                    'displayModeBar': True,
+                    'displaylogo': False,
+                    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                    'toImageButtonOptions': {
+                        'format': 'png',
+                        'filename': f'{stock_name}_{code}_kdj_analysis',
+                        'height': 400,
+                        'width': 1000,
+                        'scale': 2
+                    }
+                }
+            ))
+
+            # 4. RSI相对强弱指标图
+            rsi_fig = go.Figure()
+
+            rsi_fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df['RSI'],
+                name='RSI',
+                line=dict(color=colors['rsi'], width=3),
+                hovertemplate='<b>RSI</b><br>日期: %{x}<br>值: %{y:.2f}<extra></extra>'
+            ))
+
+            # RSI参考线和区域
+            rsi_fig.add_hline(y=70, line=dict(color=colors['overbought'], dash='dash', width=2))
+            rsi_fig.add_hline(y=30, line=dict(color=colors['oversold'], dash='dash', width=2))
+
+            # 添加RSI超买超卖区域填充
+            rsi_fig.add_hrect(y0=70, y1=100, fillcolor="rgba(220, 53, 69, 0.1)", line_width=0)
+            rsi_fig.add_hrect(y0=0, y1=30, fillcolor="rgba(25, 135, 84, 0.1)", line_width=0)
+
+            rsi_fig.update_layout(
+                title=f'📋 {stock_name} ({code}) RSI相对强弱指标',
+                height=400,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1
+                ),
+                hovermode='x unified',
+                template='plotly_white',
+                paper_bgcolor='#FAFAFA',
+                plot_bgcolor='white',
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='%Y-%m-%d'
+                ),
+                yaxis=dict(
+                    title="RSI",
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(128,128,128,0.2)',
+                    tickformat='.2f',
+                    range=[0, 100]
+                )
+            )
+
+            charts_html.append(rsi_fig.to_html(
+                include_plotlyjs=False,
+                full_html=False,
+                config={
+                    'displayModeBar': True,
+                    'displaylogo': False,
+                    'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d'],
+                    'toImageButtonOptions': {
+                        'format': 'png',
+                        'filename': f'{stock_name}_{code}_rsi_analysis',
+                        'height': 400,
+                        'width': 1000,
+                        'scale': 2
+                    }
+                }
+            ))
+
+            # 将所有图表HTML合并
+            combined_html = '\n'.join(charts_html)
+            return combined_html
 
         except Exception as e:
-            print(f"绘制图表时出错: {str(e)}")
+            print(f"生成交互式图表时出错: {str(e)}")
             return None
 
     def generate_analysis_data(self, code):
@@ -686,17 +928,15 @@ class StockAnalyzer:
                             """
 
                 # 图表部分
-                chart_html = ""
+                chart_html = self.plot_analysis(code)
+
                 if chart_base64:
                     chart_html = f"""
                     <div class="section-divider">
                         <h2>技术指标图表</h2>
                     </div>
-                    
                     <div class="chart-container">
-                        <img src="data:image/png;base64,{chart_base64}" 
-                             alt="{stock_name} ({code})技术分析图表"
-                             loading="lazy">
+                        {chart_html}
                     </div>
                     """
                 else:
